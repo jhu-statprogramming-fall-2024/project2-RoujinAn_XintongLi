@@ -199,6 +199,8 @@ ggplot(combined_data, aes(x = college_grad_rate, y = poverty_rate)) +
 ```
 
 ```{r}
+#| echo: true
+#| output: false
 # Get state geometries (GEOID + geometry)
 state_geometries <- get_acs(
   geography = "state",
@@ -217,8 +219,8 @@ names(combined_data_with_geometry)
 
 # Convert combined_data_with_geometry to an sf object
 combined_data_with_geometry <- st_as_sf(combined_data_with_geometry)
-
-
+```
+```{r}
 #Plotting with goem_sf()
 ggplot(combined_data_with_geometry, aes(fill = college_grad_rate)) +
   geom_sf(color = "white", size = 0.1) +  # Thin border for focus on map
@@ -287,7 +289,6 @@ ggplot(combined_data_with_geometry, aes(fill = college_grad_rate)) +
 | **`geom_point()`** | Created scatter plots to visualize relationships (e.g., poverty vs. education rates). |
 | **`geom_col()`** | Created bar plots for visualizing state-level data like income and variability. |
 | **`geom_sf()`** | Generated choropleth maps for visualizing geographic distribution of college graduation rates. |
-| **`geom_text()`** | Added state abbreviations on the map for better interpretability. |
 | **`stat_smooth()`** | Added regression lines to scatter plots to explore trends in the data. |
 
 In this analysis, we examined the socioeconomic disparities across U.S. states using data from the **tidycensus** package for the year 2020. Specifically, we focused on **median household income**, **poverty rates**, and **college graduation rates** to explore the relationships and variability among these metrics.
@@ -306,26 +307,54 @@ In this analysis, we examined the socioeconomic disparities across U.S. states u
 ```{r}
 #| message: false
 #| warning: false
+# load packages
 library(dplyr)
 library(rvest)
+library(ggplot2)
 
+# read the HTML content from the rotten tomatoes webpage: 100 Best Movies on Netflix Ranked by Tomatometer (November 2024)
 page <- read_html("https://editorial.rottentomatoes.com/guide/best-netflix-movies-to-watch-right-now/")
 
+# extract director information
 director <- page %>%
-  html_elements(".info.director") %>%
-  html_text(trim = TRUE) 
+  html_elements(".info.director") %>% # target elements with class ".info.director" containing director info
+  html_text(trim = TRUE) # trim whitespace
 
+# clean extracted text by removing "Directed By:" 
 director <- gsub("Directed By:\\s*", "", director)
 
+# convert the cleaned data to a data frame
 director <- data.frame(director)
+# rename the column to distinguish between column name and data frame name 
 director <- director %>% rename(director_name = director)
 
+# create a frequency table to count the occurrences of each director
 freq <- table(director$director_name)
+# convert the frequency table to a data frame so filter() can be applied
 freq <- as.data.frame(freq)
-filtered_director <- freq %>% filter(Freq > 1)
-filtered_director <- filtered_director %>% 
-  rename(Frequency = Freq, Director_name = Var1)
-filtered_director
+# ranked the occurrences of each director by frequency in descending order
+ranked_director <- freq %>%
+  rename(Frequency = Freq, Director_name = Var1) %>%
+  arrange(desc(Frequency)) 
+ranked_director
+
+# bar plot to visualize the frequency
+ggplot(ranked_director, aes(x = reorder(Director_name, -Frequency), y = Frequency, fill = Frequency)) + 
+  geom_col() + 
+  coord_flip() + 
+  labs(
+    title = "Top Directors in 'Best Netflix Movies' List",
+    x = "Director",
+    y = "Number of Movies",
+    caption = "Source: Rotten Tomatoes"
+  ) + 
+  theme_minimal() + 
+  theme(
+    axis.text.y = element_text(size = 4),  # Adjust font size of row label
+    plot.margin = margin(1, 1, 1, 1) 
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)))  # Correct placement of scale_y_continuous
+
 ```
 
 # Summary

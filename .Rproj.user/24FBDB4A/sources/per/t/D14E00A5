@@ -1,9 +1,9 @@
 {
     "id": "D14E00A5",
-    "path": "~/Desktop/stat_project_2/stat_project_2.qmd",
+    "path": "~/Desktop/stat_programming/project_2/stat_project_2/stat_project_2.qmd",
     "project_path": "stat_project_2.qmd",
     "type": "quarto_markdown",
-    "hash": "3930611505",
+    "hash": "3029050568",
     "contents": "",
     "dirty": false,
     "created": 1731638714202.0,
@@ -17,15 +17,15 @@
         "docOutlineVisible": "1",
         "rmdVisualCollapsedChunks": "",
         "rmdVisualModeLocation": "38:0",
-        "cursorPosition": "24,49",
-        "scrollLine": "31"
+        "cursorPosition": "352,39",
+        "scrollLine": "348"
     },
     "folds": "",
-    "lastKnownWriteTime": 1731719583,
+    "lastKnownWriteTime": 1731724763,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1731719583562,
+    "last_content_update": 1731724763520,
     "read_only": false,
     "read_only_alternatives": []
 }
