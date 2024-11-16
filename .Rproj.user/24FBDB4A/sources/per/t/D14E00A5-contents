@@ -1,0 +1,340 @@
+---
+title: "Project 2"
+---
+Group members: Xintong Li (xli355\@jh.edu, JHED ID: xli355), Roujin An (ran8\@jhmi.edu, JHED ID: ran8)
+
+## Part 1
+
+```{r}
+#| message: false
+#| warning: false
+library(tidycensus)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(purrr)
+library(sf)
+census_api_key("9d5d2ec5ead1cb2d84a9499115e07a1b27dec01c")
+```
+
+### 1.1 Question to be answered 
+
+Question: *How do median household income, poverty rates, and educational attainment (college graduation rates) vary across different states in the U.S. in 2020?*
+
+Visualization: we will visualize with a bar chart to display median household income by state, highlighting economic disparities. A scatter plot with a regression line will be visualized to examine the relationship between poverty rates and college graduation rate, revealing potential correlations. Finally, a choropleth map (geom_sf()) will visualize college graduation rates geographically, showcasing educational attainment differences across states.
+
+### 1.2 Data extraction
+```{r}
+# Median Household Income
+income_data <- get_acs(
+  geography = "state",
+  variables = "B19013_001",
+  year = 2020,
+  survey = "acs5"
+)
+#Save data locally
+write_csv(income_data, "income_data.csv")
+# Poverty Data
+poverty_data <- get_acs(
+  geography = "state",
+  variables = "B17001_002",
+  year = 2020,
+  survey = "acs5"
+)
+#Save data locally
+write_csv(poverty_data, "poverty_data.csv")
+# education
+education_college <- get_acs(
+  geography = "state",
+  variables = "B15003_022",  # Bachelor's degree
+  year = 2020,
+  survey = "acs5"
+)
+#Save data locally
+write_csv(education_college, "education_college.csv")
+
+# Total Population for Poverty Rate
+total_population <- get_acs(
+  geography = "state",
+  variables = "B01003_001",  # Total population
+  year = 2020,
+  survey = "acs5"
+)
+#Save data locally
+write_csv(total_population, "total_population.csv")
+
+# Total Population 25+ for Education Rate
+total_adult_population <- get_acs(
+  geography = "state",
+  variables = "B15003_001",  # Total population aged 25+
+  year = 2020,
+  survey = "acs5"
+)
+#Save data locally
+write_csv(total_adult_population, "total_adult_population.csv")
+
+head(income_data)
+head(poverty_data)
+head(education_college)
+head(total_population)
+head(total_adult_population)
+```
+
+### 1.3 Data cleaning
+
+```{r}
+# remove unwanted column such as moe
+income_data_clean <- income_data %>%
+  select(GEOID, NAME, income = estimate)
+poverty_data_clean <- poverty_data %>%
+  select(GEOID, NAME, poverty = estimate)
+education_data_clean <- education_college %>%
+  select(GEOID, NAME, education_college = estimate)
+total_population_clean <- total_population %>%
+  select(GEOID, NAME, total_population = estimate)
+adult_population_clean <- total_adult_population %>%
+  select(GEOID, NAME, adult_population = estimate)
+
+# combining data
+combined_data <- income_data_clean %>%
+  left_join(poverty_data_clean, by = c("GEOID", "NAME")) %>%
+  left_join(education_data_clean, by = c("GEOID", "NAME")) %>%
+  left_join(total_population_clean, by = c("GEOID", "NAME")) %>%
+  left_join(adult_population_clean, by = c("GEOID", "NAME"))
+
+head(combined_data)
+
+# calculating rate of poverty and education in each state 
+combined_data <- combined_data %>%
+  mutate(
+    poverty_rate = (poverty / total_population) * 100,
+    college_grad_rate = (education_college / adult_population) * 100
+  )
+
+head(combined_data)
+
+# purrr function one: pmap_chr(): to group states into the following categories: high poverty low education; and low poverty high income; high poverty and high income; low poverty and low income
+
+combined_data <- combined_data %>%
+  mutate(socioeconomic_category = pmap_chr(
+    list(poverty_rate, college_grad_rate, income),
+    ~ case_when(
+      ..1 > 20 & ..3 > 60000 ~ "High Poverty, High Income",  # New Category 1
+      ..1 < 10 & ..3 < 60000 ~ "Low Poverty, Low Income",    # New Category 2
+      ..1 > 20 & ..2 < 30 ~ "High Poverty, Low Education",   # Pre-existing Category
+      ..1 < 10 & ..3 > 60000 ~ "Low Poverty, High Income",   # Pre-existing Category
+      TRUE ~ "Other States"                                  # Default
+    )
+  ))
+
+# Check the number of states in each category
+table(combined_data$socioeconomic_category)
+# Group by socioeconomic category and list states in each category
+state_categories <- combined_data %>%
+  group_by(socioeconomic_category) %>%
+  summarize(states = paste(NAME, collapse = ", "), .groups = 'drop')
+# Print the resulting data frame
+print(state_categories)
+
+# Check the variability of each variable across states
+# Normalize selected columns using min-max scaling
+normalized_data <- combined_data %>%
+  select(income, poverty_rate, college_grad_rate) %>%
+  mutate(across(everything(), ~ (. - min(.)) / (max(.) - min(.))))
+
+# Use imap() to calculate standard deviation on normalized data: the second purrr function
+column_variability <- normalized_data %>%
+  imap(~ tibble(column = .y, std_dev = sd(.x, na.rm = TRUE))) %>%
+  bind_rows()
+
+# View the results
+print(column_variability)
+
+```
+
+```{r fig.height=12, fig.width=8}
+# Brief visualization of the raw poverty rate values 
+# Plot raw poverty rates values for each state using combined_data
+ggplot(combined_data, aes(x = reorder(NAME, poverty_rate), y = poverty_rate)) +
+  geom_point(color = "coral", size = 3) +
+  coord_flip() +
+  labs(
+    title = "Poverty Rates Across States (2020)",
+    subtitle = "Highlighting disparities in poverty levels by state",
+    x = "State",
+    y = "Poverty Rate (%)",
+    caption = "Source: U.S. Census Bureau, ACS 2020"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8)) 
+```
+
+### 1.4 Data visualization 
+
+```{r fig.height=12, fig.width=8}
+# medium income across states
+ggplot(combined_data, aes(x = reorder(NAME, income), y = income)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Median Household Income by State (2020)",
+    subtitle = "Visualizing economic disparities across the United States",  # Subtitle
+    caption = "Source: U.S. Census Bureau, ACS 2020 5-Year Estimates",  # Caption
+       x = "State", y = "Median Income (USD)") +
+  theme_minimal()+
+  theme(axis.text.y = element_text(size = 8))
+```
+
+```{r}
+# correlation between education and poverty with a regression line
+ggplot(combined_data, aes(x = college_grad_rate, y = poverty_rate)) +
+  geom_point(color = "darkgreen", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "Poverty Rate vs. College Graduation Rate",
+      subtitle = "States with higher educational attainment tend to have lower poverty rates",
+    caption = "Source: U.S. Census Bureau, ACS 2020 5-Year Estimates",
+       x = "College Graduation Rate (%)", y = "Poverty Rate (%)") +
+  theme_minimal()+
+  theme(plot.subtitle = element_text(size = 8, face = "italic"))
+```
+
+```{r}
+# Get state geometries (GEOID + geometry)
+state_geometries <- get_acs(
+  geography = "state",
+  variables = "B19013_001",  # Any variable; we only need GEOID + geometry
+  year = 2020,
+  geometry = TRUE
+) %>%
+  select(GEOID, geometry)  # Keep only GEOID and geometry columns
+write_csv(state_geometries, 'state_geometries.csv')
+
+combined_data_with_geometry <- combined_data %>%
+  left_join(state_geometries, by = "GEOID")
+
+
+names(combined_data_with_geometry)
+
+# Convert combined_data_with_geometry to an sf object
+combined_data_with_geometry <- st_as_sf(combined_data_with_geometry)
+
+
+#Plotting with goem_sf()
+ggplot(combined_data_with_geometry, aes(fill = college_grad_rate)) +
+  geom_sf(color = "white", size = 0.1) +  # Thin border for focus on map
+  scale_fill_viridis_c(direction = -1) +  # Reverse the color scale
+  labs(
+    title = "College Graduation Rates by State (2020)",
+    subtitle = "Highlighting educational attainment disparities across the U.S.",
+    caption = "Source: U.S. Census Bureau, ACS 2020 5-Year Estimates",
+    fill = "Graduation Rate (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",         # Place legend below the plot
+    legend.key.width = unit(1.5, "cm"), # Reduce legend width
+    legend.key.height = unit(0.3, "cm"),# Reduce legend height
+    plot.title = element_text(size = 16, hjust = 0.5, face = "bold"),  # Center and bold title
+    plot.subtitle = element_text(size = 12, hjust = 0.5, face = "italic"),  # Center subtitle
+    plot.caption = element_text(size = 10, hjust = 0),  # Align caption to left
+    axis.text = element_blank(),  # Remove axis text for focus on map
+    panel.grid = element_blank(),  # Clean map grid lines
+    plot.margin = margin(10, 10, 10, 10)  # Maximize map area
+  )
+```
+
+### 1.5 Findings 
+
+### Function Dictionary
+
+### `purrr` Functions
+
+| Function | Purpose |
+|---------------|---------------------------------------------------------|
+| **`pmap_chr()`** | Categorized states based on poverty, income, and education by applying a function across multiple columns. |
+| **`map_df()`** or **`imap()`** | Iterated over columns to compute summary statistics (e.g., variability via standard deviation). |
+
+------------------------------------------------------------------------
+
+### `dplyr` Functions
+
+| Function | Purpose |
+|---------------|---------------------------------------------------------|
+| **`select()`** | Selected specific columns for analysis or visualization. |
+| **`mutate()`** | Created new variables, such as normalized values and socioeconomic categories. |
+| **`filter()`** | Filtered rows based on specific conditions (e.g., high poverty states). |
+| **`summarize()`** | Aggregated data to summarize states within each category. |
+| **`group_by()`** | Grouped data by socioeconomic categories for aggregation. |
+| **`bind_cols()`** | Combined data frames to reattach normalized columns or summaries. |
+| **`arrange()`** | Ordered data by specific columns (e.g., poverty rates for plots). |
+| **`pivot_longer()`** | Transformed wide data into long format for easier comparison and plotting. |
+
+------------------------------------------------------------------------
+
+### `tidyverse` General Functions
+
+| Function          | Purpose                                              |
+|-------------------|------------------------------------------------------|
+| **`read_csv()`**  | Imported CSV files containing raw data.              |
+| **`write_csv()`** | Saved cleaned or processed data for reproducibility. |
+
+------------------------------------------------------------------------
+
+### `ggplot2` Geom Functions
+
+| Function | Purpose |
+|----------------|--------------------------------------------------------|
+| **`geom_point()`** | Created scatter plots to visualize relationships (e.g., poverty vs. education rates). |
+| **`geom_col()`** | Created bar plots for visualizing state-level data like income and variability. |
+| **`geom_sf()`** | Generated choropleth maps for visualizing geographic distribution of college graduation rates. |
+| **`geom_text()`** | Added state abbreviations on the map for better interpretability. |
+| **`stat_smooth()`** | Added regression lines to scatter plots to explore trends in the data. |
+
+In this analysis, we examined the socioeconomic disparities across U.S. states using data from the **tidycensus** package for the year 2020. Specifically, we focused on **median household income**, **poverty rates**, and **college graduation rates** to explore the relationships and variability among these metrics.
+
+**Method Used:** To explore variability and disparities across states: we conducted a variation analysis by calculating the standard deviation for each metric (income, poverty, and education). This helped identify which variables showed the greatest disparities. purrr functions were employed to categorize states based on combinations of poverty, income, and education levels, allowing us to label and analyze socioeconomic patterns. We created several plots to communicate key findings. A bar chart displayed median household income by state, highlighting economic disparities. A scatter plot visualized the relationship between poverty rates and college graduation rates, including a regression line to show trends. Lastly, a choropleth map was used to represent college graduation rates by state, with state abbreviations included to enhance interpretability.
+
+**Key Findings:** The calculated **standard deviations** revealed that **college graduation rates** exhibit the highest variability across states (**0.223**), followed by **income** (**0.180**) and **poverty rates** (**0.140**).
+
+**Poverty and Income Trends**: States such as **Mississippi** and **Louisiana** show consistently **high poverty rates** (\>20%), whereas states like **New Hampshire** and Maryland maintain **low poverty rates** (\<10%). Puerto Rico stands out as the only state with severe economic disparities, characterized by both high poverty rate ( \> 20% ) and low college graduation rate (\< 30%), placing it in the ‘high Poverty, low education’ category.
+
+**Correlation Between Education and Poverty**: A scatter plot comparing **college graduation rates** and **poverty rates** highlighted a negative trend: states with **higher education levels** tend to have **lower poverty rates**. For instance, **Massachusetts**, with a college graduation rate above 45%, has one of the lowest poverty rates, while states like **Mississippi** show the reverse trend.
+**Data Source Limitations**: The analysis relies on the **ACS 5-Year Estimates**, which are subject to **sampling variability**. The dataset may not fully capture rapid economic changes, such as those induced by the COVID-19 pandemic in 2020. State-level data may **mask regional disparities** within states. Urban-rural divides could lead to misinterpretation of overall state metrics.
+
+# Part 2
+# Data Analysis
+```{r}
+#| message: false
+#| warning: false
+library(dplyr)
+library(rvest)
+
+page <- read_html("https://editorial.rottentomatoes.com/guide/best-netflix-movies-to-watch-right-now/")
+
+director <- page %>%
+  html_elements(".info.director") %>%
+  html_text(trim = TRUE) 
+
+director <- gsub("Directed By:\\s*", "", director)
+
+director <- data.frame(director)
+director <- director %>% rename(director_name = director)
+
+freq <- table(director$director_name)
+freq <- as.data.frame(freq)
+filtered_director <- freq %>% filter(Freq > 1)
+filtered_director <- filtered_director %>% 
+  rename(Frequency = Freq, Director_name = Var1)
+filtered_director
+```
+
+# Summary
+<p style="text-indent: 2em;"> 
+We used the rvest package to scrape HTML content from a Rotten Tomatoes webpage listing the "100 Best Movies on Netflix Ranked by Tomatometer." To extract director information, we utilized html_elements() and html_text(). We then cleaned the extracted text using gsub() to remove the "Directed By:" prefix. The cleaned data was converted into a data frame, and the director column was renamed to distinguish from the name of the data frame. We created a frequency table using table(), converted it to a data frame, and filtered the results to show only rows where director names appeared more than once. 
+</p>
+<p style="text-indent: 2em;"> 
+The analysis revealed that among the top 100 movies, Noah Baumbach was the most frequently appearing director, with three films. Alfred Hitchcock, Leigh Janiak, and Richard Linklater followed, each with two movies. All other directors on the list directed one movie each.
+</p>
+<p style="text-indent: 2em;"> 
+An limitation is that new movies may be added or removed from this webpage. My analysis based on a snapshot may not reflect the latest rankings. The structure of the webpage may also change, which could lead to incomplete or incorrect extraction using html_elements(). Furthermore, the analysis only focuses on the frequency of directors' appearances without accounting for qualitative factors, such as the genres, styles, and cultural impacts of the movies. 
+</p>
